@@ -1,0 +1,568 @@
+{% extends "base.html" %}
+
+{% block title %}ytllm - 模型对话{% end %}
+{% block nav-playground %}active{% end %}
+{% block page_title %}模型对话{% end %}
+{% block styles %}
+    <style>
+        .content-inner { max-width: none; margin: 0; height: 100%; display: flex; flex-direction: row; gap: 20px; min-height: 0; }
+        .page-body { flex: 1 1 auto; display: flex; gap: 20px; min-height: 0; min-width: 0; }
+
+        .panel-left { width: 308px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; padding-right: 4px; }
+        .panel-right { flex-grow: 1; display: flex; flex-direction: column; min-width: 0; gap: 14px; }
+
+        .form-label-tiny { font-size: .7rem; letter-spacing: .05em; text-transform: uppercase; color: var(--text-mute); font-weight: 600; margin-bottom: 10px; display: block; }
+
+        .code-box {
+            background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+            padding: 12px 14px; font-family: var(--mono); font-size: .72rem; line-height: 1.65;
+            white-space: pre-wrap; word-break: normal; overflow-wrap: break-word;
+            color: var(--text-dim); max-height: 170px; overflow: auto;
+        }
+
+        .stream { flex-grow: 1; overflow-y: auto; padding: 28px 30px; display: flex; flex-direction: column; gap: 22px; min-height: 0; }
+        .msg { display: flex; flex-direction: column; max-width: 76%; }
+        .msg.user { align-self: flex-end; align-items: flex-end; }
+        .msg.bot { align-self: flex-start; align-items: flex-start; }
+        .msg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: .72rem; color: var(--text-mute); }
+        .msg-body { border-radius: 14px; padding: 13px 17px; font-size: .9rem; line-height: 1.78; white-space: pre-wrap; word-break: break-word; border: 1px solid var(--border); }
+        .msg.user .msg-body { background: var(--accent); color: var(--on-accent); border-color: var(--accent); border-bottom-right-radius: 5px; }
+        .msg.bot .msg-body { background: var(--surface); color: var(--text); border-bottom-left-radius: 5px; }
+        .msg-body.error { color: var(--err); }
+        .msg-img { display: block; margin: 0 0 10px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); max-width: 260px; }
+        .msg-img img { display: block; width: 100%; height: auto; cursor: pointer; }
+
+        .caret { display: inline-block; width: 7px; height: 15px; background: var(--accent); vertical-align: -2px; margin-left: 3px; animation: blink 1.05s steps(2, start) infinite; border-radius: 1px; opacity: .85; }
+        @keyframes blink { to { visibility: hidden; } }
+
+        .empty-hint { margin: auto; text-align: center; color: var(--text-mute); padding: 40px 20px; }
+        .empty-hint i { opacity: .35; }
+
+        .composer { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 16px; transition: border-color .2s, box-shadow .2s; }
+        .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+        .composer.dragover { border-color: var(--accent) !important; background: var(--accent-soft); }
+        .composer textarea { border: none !important; background: transparent !important; resize: none; box-shadow: none !important; padding: 2px 0; font-size: .92rem; line-height: 1.7; color: var(--text); }
+        .composer textarea:disabled { opacity: .55; }
+        .composer textarea::placeholder { color: var(--text-mute); }
+        .composer-bar { display: flex; align-items: center; justify-content: space-between; padding-top: 12px; margin-top: 6px; border-top: 1px solid var(--border); }
+
+        .icon-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid var(--border); color: var(--text-mute); background: transparent; cursor: pointer; transition: all .18s; }
+        .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+        .icon-btn.on { color: var(--accent); border-color: var(--accent-line); }
+
+        .attach-wrap { display: flex; gap: 10px; flex-wrap: wrap; padding-bottom: 12px; }
+        .attach-item { position: relative; width: 84px; height: 84px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--bg); }
+        .attach-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .attach-del { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; border: none; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; cursor: pointer; padding: 0; }
+        .attach-del:hover { background: rgba(0,0,0,.8); }
+        .attach-meta { font-size: .7rem; color: var(--text-mute); margin-top: 4px; }
+
+        .hint-line { font-size: .72rem; color: var(--text-mute); opacity: .85; }
+        .svc-line { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-dim); }
+        .pill { font-size: .68rem; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--text-mute); }
+
+        @media (max-width: 992px) {
+            .content-area { flex-direction: column; overflow-y: auto; }
+            .content-inner { flex-direction: column; }
+            .page-body { flex-direction: column; min-height: 520px; }
+            .panel-left { width: 100%; flex-direction: row; flex-wrap: wrap; gap: 12px; overflow: visible; padding-right: 0; }
+            .panel-left > .card { flex: 1 1 240px; }
+            .panel-right { min-height: 520px; }
+            .stream { padding: 20px 18px; }
+        }
+        @media (max-width: 768px) {
+            .panel-left { flex-direction: column; }
+            .panel-right { min-height: 440px; }
+            .stream { padding: 16px 14px; }
+            .msg { max-width: 90%; }
+            .composer-bar { flex-wrap: wrap; gap: 10px; }
+            .composer-bar .hint-line { flex-basis: 100%; order: 2; }
+        }
+        @media (max-width: 576px) {
+            .msg { max-width: 96%; }
+            .msg-body { font-size: .88rem; padding: 11px 14px; }
+            .attach-item { width: 72px; height: 72px; }
+            .stream { padding: 14px 12px; gap: 18px; }
+        }
+    </style>
+{% end %}
+
+{% block content %}
+    <div class="modal fade" id="imageModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content" style="background:transparent;border:none;">
+                <img id="imageModalImg" src="" style="width:100%;border-radius:12px;">
+            </div>
+        </div>
+    </div>
+
+        <div class="page-body">
+            <div class="panel-left">
+                <div class="card p-3">
+                    <span class="form-label-tiny">推理服务</span>
+                    <select class="form-select form-select-sm mb-3" id="service-select"></select>
+                    <div id="service-meta" class="svc-line mb-3"></div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-soft flex-grow-1" id="goto-models-btn"><i class="bi bi-hdd-stack me-1"></i>管理服务</button>
+                    </div>
+                </div>
+
+                <div class="card p-3">
+                    <span class="form-label-tiny">请求参数</span>
+                    <div class="mb-2">
+                        <div class="d-flex justify-content-between small text-muted mb-1">
+                            <span>Max Tokens</span><span class="fw-semibold text-primary" id="v-max-tokens">512</span>
+                        </div>
+                        <input type="range" class="form-range" id="max-tokens" min="16" max="4096" step="16" value="512">
+                    </div>
+                    <div class="mb-2">
+                        <div class="d-flex justify-content-between small text-muted mb-1">
+                            <span>Temperature</span><span class="fw-semibold text-primary" id="v-temperature">0.80</span>
+                        </div>
+                        <input type="range" class="form-range" id="temperature" min="0" max="2" step="0.05" value="0.8">
+                    </div>
+                    <div class="mb-2">
+                        <div class="d-flex justify-content-between small text-muted mb-1">
+                            <span>Top-P</span><span class="fw-semibold text-primary" id="v-top-p">0.90</span>
+                        </div>
+                        <input type="range" class="form-range" id="top-p" min="0.05" max="1" step="0.05" value="0.9">
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label small text-muted mb-1">Top-K</label>
+                            <input type="number" class="form-control form-control-sm" id="top-k" value="1">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small text-muted mb-1">重复惩罚</label>
+                            <input type="number" step="0.05" class="form-control form-control-sm" id="repeat-penalty" value="1.1">
+                        </div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="stream-switch" checked>
+                        <label class="form-check-label small text-muted" for="stream-switch">流式输出</label>
+                    </div>
+                </div>
+
+                <details class="card p-3">
+                    <summary class="form-label-tiny" style="cursor:pointer;user-select:none;">接口信息</summary>
+                    <div class="code-box mt-3" id="request-info">尚未请求</div>
+                    <button class="btn btn-sm btn-soft w-100 mt-3" id="copy-curl-btn"><i class="bi bi-clipboard me-1"></i>复制 curl</button>
+                </details>
+            </div>
+
+            <div class="panel-right">
+                <div class="card d-flex flex-column" style="flex:1 1 auto;min-height:0;">
+                    <div class="px-4 py-3 d-flex justify-content-between align-items-center" style="border-bottom:1px solid var(--border);">
+                        <span class="fw-semibold small">对话</span>
+                        <span class="small text-muted" id="result-meta"></span>
+                    </div>
+                    <div class="stream" id="stream">
+                        <div class="empty-hint">
+                            <i class="bi bi-chat-square-text fs-1 d-block mb-3"></i>
+                            <div>输入内容开始测试，支持上传 / 拖拽 / 粘贴图片进行多模态验证</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card p-3 composer" id="composer">
+                    <div class="attach-wrap" id="attach-wrap" style="display:none;"></div>
+                    <textarea class="form-control" id="prompt-input" rows="2" placeholder="输入测试内容…  Enter 发送，Shift+Enter 换行"></textarea>
+                    <div class="composer-bar">
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="icon-btn" id="pick-image-btn" title="上传图片（也支持拖拽 / Ctrl+V 粘贴）"><i class="bi bi-image"></i></button>
+                            <span class="hint-line" id="vision-hint"></span>
+                        </div>
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="hint-line d-none d-md-inline">单次请求独立发送，不携带上下文</span>
+                            <button class="btn btn-primary" id="send-btn"><i class="bi bi-send-fill me-1"></i>发送</button>
+                        </div>
+                    </div>
+                    <input type="file" id="file-input" accept="image/*" hidden>
+                </div>
+            </div>
+        </div>
+{% end %}
+
+{% block scripts %}
+    <script>
+    (function(){
+        var allServices = [];
+        var current = null;
+        var busy = false;
+        var pendingImage = null;
+        var msgCount = 0;
+
+        /* ---------- 工具 ---------- */
+        function escapeHtml(t) {
+            var d = document.createElement('div');
+            d.textContent = t == null ? '' : String(t);
+            return d.innerHTML;
+        }
+        function statusMeta(s) {
+            if (s.service_type !== 'local') {
+                if (s.last_status === 'online') return { color:'#22c55e', text:'在线' };
+                if (s.last_status === 'offline') return { color:'#ef4444', text:'离线' };
+                return { color:'#94a3b8', text:'未检测' };
+            }
+            if (s.status === 'running') return { color:'#22c55e', text:'运行中' };
+            if (s.status === 'starting') return { color:'#f59e0b', text:'启动中' };
+            if (s.status === 'error') return { color:'#ef4444', text:'启动失败' };
+            return { color:'#94a3b8', text:'已停止' };
+        }
+
+        /* ---------- 服务 ---------- */
+        function loadServices() {
+            $.get('/models/api/services/', function(res) {
+                if (res.status !== 'success') return;
+                allServices = res.services || [];
+                var $sel = $('#service-select');
+                var keep = $sel.val();
+                $sel.html('');
+                for (var i = 0; i < allServices.length; i++) {
+                    $sel.append('<option value="' + allServices[i].id + '">' + escapeHtml(allServices[i].name) + '</option>');
+                }
+                var want = new URLSearchParams(location.search).get('service') || keep;
+                if (want && $sel.find('option[value="' + want + '"]').length) $sel.val(want);
+                if (!$sel.val() && allServices.length) $sel.val(allServices[0].id);
+                syncCurrent();
+            });
+        }
+        function syncCurrent() {
+            var sid = $('#service-select').val();
+            current = null;
+            for (var i = 0; i < allServices.length; i++) {
+                if (allServices[i].id === sid) { current = allServices[i]; break; }
+            }
+            if (!current) {
+                $('#service-meta').html('<span class="text-muted">未选择服务</span>');
+                $('#vision-hint').text('');
+                return;
+            }
+            var m = statusMeta(current);
+            var meta = '<span class="dot" style="background:' + m.color + '"></span><span>' + m.text + '</span>'
+                     + '<span class="pill">' + escapeHtml(current.base_url) + '</span>';
+            $('#service-meta').html(meta);
+            var hasVision = !!current.vision_model_path;
+            $('#vision-hint').text(hasVision ? '视觉模型已配置' : (current.service_type === 'local' ? '未配置视觉模型' : ''));
+            renderRequestInfo();
+        }
+
+        /* ---------- 参数 ---------- */
+        function currentParams() {
+            return {
+                max_tokens: parseInt($('#max-tokens').val(), 10),
+                temperature: parseFloat($('#temperature').val()),
+                top_p: parseFloat($('#top-p').val()),
+                top_k: parseInt($('#top-k').val(), 10),
+                repeat_penalty: parseFloat($('#repeat-penalty').val())
+            };
+        }
+        function renderRequestInfo() {
+            if (!current) return;
+            var p = currentParams();
+            var lines = [
+                'POST ' + current.base_url + '/chat/completions',
+                'Authorization: Bearer ' + (current.api_key || 'sk-***'),
+                '',
+                'model: ' + current.model_id,
+                'max_tokens: ' + p.max_tokens + '   temperature: ' + p.temperature,
+                'top_p: ' + p.top_p + '   top_k: ' + p.top_k + '   repetition_penalty: ' + p.repeat_penalty,
+                'stream: ' + ($('#stream-switch').is(':checked') ? 'true' : 'false'),
+                'image: ' + (pendingImage ? '1 张（' + pendingImage.w + '×' + pendingImage.h + '）' : '无')
+            ];
+            $('#request-info').text(lines.join('\n'));
+        }
+        ['#max-tokens','#temperature','#top-p','#top-k','#repeat-penalty','#stream-switch'].forEach(function(sel){
+            $(document).on('input change', sel, function() {
+                $('#v-max-tokens').text($('#max-tokens').val());
+                $('#v-temperature').text(parseFloat($('#temperature').val()).toFixed(2));
+                $('#v-top-p').text(parseFloat($('#top-p').val()).toFixed(2));
+                renderRequestInfo();
+            });
+        });
+        $('#service-select').on('change', function() {
+            history.replaceState(null, '', '/chat/?service=' + encodeURIComponent($(this).val()));
+            syncCurrent();
+        });
+        $('#goto-models-btn').on('click', function() { location.href = '/models/'; });
+
+        /* ---------- 图片附件 ---------- */
+        var MAX_SIDE = 1024;
+        function setImage(file) {
+            if (!file) return;
+            if (file.type.indexOf('image/') !== 0) { showToast('仅支持图片文件', 'error'); return; }
+            var reader = new FileReader();
+            reader.onload = function() {
+                var img = new Image();
+                img.onload = function() {
+                    var w = img.width, h = img.height;
+                    var scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+                    var cw = Math.round(w * scale), ch = Math.round(h * scale);
+                    var cv = document.createElement('canvas');
+                    cv.width = cw; cv.height = ch;
+                    var ctx = cv.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, cw, ch);
+                    ctx.drawImage(img, 0, 0, cw, ch);
+                    pendingImage = {
+                        dataUrl: cv.toDataURL('image/jpeg', 0.85),
+                        name: file.name, w: cw, h: ch,
+                        bytes: Math.round(cv.toDataURL('image/jpeg', 0.85).length * 0.75)
+                    };
+                    renderAttach();
+                    renderRequestInfo();
+                };
+                img.onerror = function() { showToast('图片解析失败', 'error'); };
+                img.src = reader.result;
+            };
+            reader.readAsDataURL(file);
+        }
+        function renderAttach() {
+            var $w = $('#attach-wrap');
+            if (!pendingImage) { $w.hide().html(''); return; }
+            $w.show().html(
+                '<div class="attach-item">'
+                + '<img src="' + pendingImage.dataUrl + '" alt="待发送图片">'
+                + '<button class="attach-del" id="del-img-btn" title="移除"><i class="bi bi-x"></i></button>'
+                + '</div>'
+                + '<div class="attach-meta align-self-end">'
+                + escapeHtml(pendingImage.name) + '<br>' + pendingImage.w + '×' + pendingImage.h
+                + ' · ' + (pendingImage.bytes / 1024).toFixed(0) + ' KB</div>'
+            );
+        }
+        $(document).on('click', '#del-img-btn', function() {
+            pendingImage = null; renderAttach(); renderRequestInfo();
+        });
+        $('#pick-image-btn').on('click', function() { $('#file-input').click(); });
+        $('#file-input').on('change', function() {
+            if (this.files && this.files[0]) setImage(this.files[0]);
+            this.value = '';
+        });
+        var $composer = $('#composer');
+        $composer.on('dragover dragenter', function(e) {
+            e.preventDefault(); e.stopPropagation(); $(this).addClass('dragover');
+        });
+        $composer.on('dragleave drop', function(e) {
+            e.preventDefault(); e.stopPropagation(); $(this).removeClass('dragover');
+        });
+        $composer.on('drop', function(e) {
+            var dt = e.originalEvent.dataTransfer;
+            if (dt && dt.files && dt.files[0]) setImage(dt.files[0]);
+        });
+        $('#prompt-input').on('paste', function(e) {
+            var items = e.originalEvent.clipboardData && e.originalEvent.clipboardData.items;
+            if (!items) return;
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image/') === 0) {
+                    e.preventDefault();
+                    setImage(items[i].getAsFile());
+                    return;
+                }
+            }
+        });
+
+        /* ---------- 对话流 ---------- */
+        function clearEmpty() {
+            if (msgCount === 0) $('#stream').html('');
+        }
+        function addMsg(who, html) {
+            clearEmpty();
+            msgCount++;
+            var head = who === 'user'
+                ? '<i class="bi bi-person"></i><span>输入</span>'
+                : '<i class="bi bi-cpu"></i><span>响应</span>';
+            var $m = $('<div class="msg ' + who + '"><div class="msg-head">' + head + '</div>'
+                + '<div class="msg-body"></div></div>');
+            var body = '';
+            if (who === 'user' && pendingImage) {
+                body += '<div class="msg-img"><img src="' + pendingImage.dataUrl + '" data-zoom="1"></div>';
+            }
+            body += html;
+            $m.find('.msg-body').html(body);
+            $('#stream').append($m);
+            scrollBottom();
+            return $m;
+        }
+        function scrollBottom() {
+            var el = $('#stream')[0];
+            el.scrollTop = el.scrollHeight;
+        }
+        function resetStream() {
+            msgCount = 0;
+            $('#stream').html('<div class="empty-hint"><i class="bi bi-chat-square-text fs-1 d-block mb-3"></i>'
+                + '<div>已清空</div></div>');
+            $('#result-meta').text('');
+        }
+        $('#clear-btn').on('click', resetStream);
+        $(document).on('click', 'img[data-zoom]', function() {
+            $('#imageModalImg').attr('src', $(this).attr('src'));
+            new bootstrap.Modal(document.getElementById('imageModal')).show();
+        });
+
+        function setBusy(state) {
+            busy = state;
+            $('#send-btn').prop('disabled', state)
+                .html(state ? '<span class="spinner-border spinner-border-sm me-1"></span>生成中'
+                            : '<i class="bi bi-send-fill me-1"></i>发送');
+            $('#prompt-input').prop('disabled', state)
+                .attr('placeholder', state ? '模型响应中，请稍候…' : '输入测试内容…  Enter 发送，Shift+Enter 换行');
+        }
+        function setError($m, msg) {
+            $m.find('.msg-body').addClass('error').text(msg);
+        }
+
+        function send() {
+            if (busy) return;
+            var prompt = $('#prompt-input').val().trim();
+            if (!prompt && !pendingImage) { showToast('请输入测试内容或上传图片', 'error'); return; }
+            if (!current) { showToast('请先选择一个服务', 'error'); return; }
+            if (pendingImage && current.service_type === 'local' && !current.vision_model_path) {
+                showToast('该服务未配置视觉模型，图片将被忽略或报错', 'warning');
+            }
+
+            var wantStream = $('#stream-switch').is(':checked');
+            var payload = {
+                service_id: current.id,
+                prompt: prompt,
+                params: currentParams(),
+                stream: wantStream,
+                image: pendingImage ? pendingImage.dataUrl : null
+            };
+
+            setBusy(true);
+            $('#prompt-input').val('');
+            $('#result-meta').text('');
+            var $m = addMsg('user', escapeHtml(prompt || '（仅图片）'));
+            var $bot = addMsg('bot', '<span class="text-muted wait-txt">等待响应…</span>');
+            $bot.find('.msg-head span').text('响应 · ' + current.name + '（' + current.model_id + '）');
+            var started = performance.now();
+            var timerId = setInterval(function () {
+                var secs = ((performance.now() - started) / 1000).toFixed(1);
+                $('#result-meta').text('耗时 ' + secs + 's · 推理中…');
+                $bot.find('.wait-txt').text('等待响应… ' + secs + 's');
+            }, 100);
+            function stopTimer() { clearInterval(timerId); }
+
+            if (!wantStream) {
+                $.ajax({
+                    url: '/chat/api/chat/',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(payload),
+                    success: function(res) {
+                        if (res.status === 'success') {
+                            $bot.find('.msg-body').text(res.content || '(空响应)');
+                            $('#result-meta').text('耗时 ' + res.elapsed + 's · ' + res.chars + ' 字符'
+                                + (res.completion_tokens ? ' · ' + res.completion_tokens + ' tokens' : ''));
+                        } else {
+                            setError($bot, res.message || '请求失败');
+                        }
+                        scrollBottom();
+                    },
+                    error: function(xhr) {
+                        setError($bot, '请求失败：' + (xhr.status ? 'HTTP ' + xhr.status : '服务无响应'));
+                    },
+                    complete: function() { stopTimer(); setBusy(false); }
+                });
+                return;
+            }
+
+            fetch('/chat/api/chat/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(function(resp) {
+                if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+                var reader = resp.body.getReader();
+                var decoder = new TextDecoder();
+                var buf = '', text = '';
+                $bot.find('.msg-body').html('<span class="caret"></span>');
+
+                function pump() {
+                    return reader.read().then(function(r) {
+                        if (r.done) { stopTimer(); setBusy(false); return; }
+                        buf += decoder.decode(r.value, { stream: true });
+                        var parts = buf.split('\n\n');
+                        buf = parts.pop();
+                        for (var i = 0; i < parts.length; i++) {
+                            var line = parts[i];
+                            if (line.indexOf('data: ') !== 0) continue;
+                            var evt;
+                            try { evt = JSON.parse(line.slice(6)); } catch (e) { continue; }
+                            if (evt.type === 'chunk') {
+                                text += evt.content;
+                                $bot.find('.msg-body').html(escapeHtml(text) + '<span class="caret"></span>');
+                                scrollBottom();
+                            } else if (evt.type === 'error') {
+                                stopTimer();
+                                setError($bot, evt.message || '推理失败');
+                                setBusy(false);
+                                return;
+                            } else if (evt.type === 'done') {
+                                stopTimer();
+                                var secs = ((performance.now() - started) / 1000).toFixed(2);
+                                $bot.find('.msg-body').html(escapeHtml(text || '(空响应)'));
+                                $('#result-meta').text('耗时 ' + secs + 's · ' + text.length + ' 字符');
+                                setBusy(false);
+                                return;
+                            }
+                        }
+                        return pump();
+                    });
+                }
+                return pump();
+            }).catch(function(e) {
+                stopTimer();
+                setError($bot, '请求失败：' + e.message);
+                setBusy(false);
+            });
+        }
+
+        $('#send-btn').on('click', send);
+        $('#prompt-input').on('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+        });
+
+        $('#copy-curl-btn').on('click', function() {
+            if (!current) { showToast('请先选择服务', 'error'); return; }
+            var p = currentParams();
+            var content;
+            if (pendingImage) {
+                content = [
+                    { type: 'text', text: $('#prompt-input').val().trim() || '请描述这张图片' },
+                    { type: 'image_url', image_url: { url: pendingImage.dataUrl } }
+                ];
+            } else {
+                content = $('#prompt-input').val().trim() || '你好';
+            }
+            var body = JSON.stringify({
+                model: current.model_id,
+                messages: [{ role: 'user', content: content }],
+                max_tokens: p.max_tokens,
+                temperature: p.temperature,
+                top_p: p.top_p,
+                stream: $('#stream-switch').is(':checked')
+            }, null, 2);
+            var cmd = [
+                'curl ' + current.base_url + '/chat/completions \\',
+                '  -H "Content-Type: application/json" \\',
+                '  -H "Authorization: Bearer ' + (current.api_key && current.api_key.indexOf('***') < 0 ? current.api_key : 'sk-ytllm') + '" \\',
+                "  -d '" + body + "'"
+            ].join('\n');
+            navigator.clipboard.writeText(cmd).then(function() {
+                showToast('curl 命令已复制', 'success');
+            }, function() {
+                showToast('复制失败，请手动选择', 'error');
+            });
+        });
+
+        /* 全局「流式输出」设置作为 playground 默认值 */
+        var pgStream = localStorage.getItem('ytllm-stream');
+        if (pgStream === '0') $('#stream-switch').prop('checked', false);
+
+        $('#prompt-input').val('你好，简单介绍一下你自己');
+        loadServices();
+        setInterval(loadServices, 10000);
+    })();
+    </script>
+{% end %}

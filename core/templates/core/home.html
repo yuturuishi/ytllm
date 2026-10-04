@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+
+{% block title %}控制中心 - ytllm{% end %}
+{% block nav-home %}active{% end %}
+{% block page_title %}{% end %}
+
+{% block header_actions %}
+    <span class="head-status"><span class="dot" style="background:var(--ok)"></span>引擎就绪</span>
+    <span class="refresh-set" title="指标刷新频率">
+        <i class="bi bi-arrow-repeat"></i>
+        <select id="refresh-rate">
+            <option value="0">关闭</option>
+            <option value="3">3 秒</option>
+            <option value="6">6 秒</option>
+            <option value="10">10 秒</option>
+            <option value="30">30 秒</option>
+        </select>
+    </span>
+{% end %}
+
+{% block styles %}
+    <style>
+        /* ===== 硬件中心（紧凑两行） ===== */
+        .hw-hero {
+            background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+            padding: 14px 20px 12px; margin-bottom: 12px;
+        }
+        .hw-top { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+        .hw-id { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-width: 0; }
+        .hw-eyebrow {
+            font-size: 10.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase;
+            color: var(--text-mute); display: inline-flex; align-items: center; gap: 6px;
+        }
+        .hw-eyebrow i { font-size: 12px; }
+        .hw-soc { font-size: 24px; font-weight: 700; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+        .hw-id-meta { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--text-dim); }
+        .hw-id-meta .mono { font-family: var(--mono); color: var(--text); font-weight: 600; }
+        .hw-id-meta .sep { width: 1px; height: 11px; background: var(--border-strong); }
+
+        .hw-npu-inline { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .npuc { display: inline-flex; align-items: center; gap: 8px; }
+        .npuc-name { font-size: 11.5px; font-weight: 600; color: var(--text-dim); white-space: nowrap; }
+        .npuc .meter { width: 88px; height: 7px; }
+        .npuc-val { font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; min-width: 38px; text-align: right; }
+
+        .hw-versions {
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px;
+        }
+        .hw-ver { padding: 0 16px; border-left: 1px solid var(--border); min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+        .hw-ver:first-child { border-left: none; padding-left: 0; }
+        .hw-ver-label {
+            font-size: 10.5px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase;
+            color: var(--text-mute); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+        }
+        .hw-ver-label i { font-size: 11px; }
+        .hw-ver-val {
+            font-size: 13.5px; font-weight: 650; letter-spacing: -.01em;
+            font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+
+        /* 刷新频率设置（右上角） */
+        .refresh-set {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 12px; color: var(--text-dim);
+            border: 1px solid var(--border); border-radius: var(--r-xs); padding: 3px 8px;
+        }
+        .refresh-set i { font-size: 12px; }
+        .refresh-set select {
+            border: none; background: transparent; color: var(--text); font-size: 12px; font-weight: 600;
+            padding: 0; outline: none; cursor: pointer;
+        }
+
+        /* ===== 统计卡 ===== */
+        .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
+        .stat {
+            background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+            padding: 13px 18px; transition: border-color .16s;
+        }
+        .stat:hover { border-color: var(--border-strong); }
+        .stat-label {
+            font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+            color: var(--text-mute); display: flex; align-items: center; gap: 7px;
+        }
+        .stat-label i { font-size: 13px; }
+        .stat-value {
+            font-size: 24px; font-weight: 650; letter-spacing: -.03em; line-height: 1.1;
+            margin-top: 7px; font-variant-numeric: tabular-nums;
+        }
+
+        .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+
+        .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 16px 18px; }
+        .panel-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+        .panel-h .t { font-size: 13.5px; font-weight: 600; }
+
+        .meter-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+        .meter-row:last-child { border-bottom: none; padding-bottom: 2px; }
+        .meter-row:first-child { padding-top: 6px; }
+        .meter-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; }
+        .meter-name { font-size: 13px; display: flex; align-items: center; gap: 8px; }
+        .meter-name i { color: var(--text-mute); font-size: 14px; }
+        .meter-val { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+        .meter-sub { font-size: 11.5px; color: var(--text-mute); margin-top: 5px; }
+
+        .quick {
+            display: flex; align-items: center; gap: 13px; padding: 11px 0;
+            border-bottom: 1px solid var(--border); color: var(--text); transition: opacity .15s;
+        }
+        .quick:last-child { border-bottom: none; }
+        .quick:hover { opacity: .78; }
+        .quick-ic {
+            width: 34px; height: 34px; flex: none; border-radius: var(--r-xs);
+            background: var(--surface-2); border: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center; color: var(--text-dim);
+            transition: background .16s, color .16s, border-color .16s;
+        }
+        .quick:hover .quick-ic { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+        .quick-tx { flex: 1 1 auto; min-width: 0; }
+        .quick-tx b { display: block; font-size: 13.5px; font-weight: 600; }
+        .quick-tx span { font-size: 11.5px; color: var(--text-mute); }
+        .quick-ar { color: var(--text-mute); font-size: 14px; transition: transform .16s; }
+        .quick:hover .quick-ar { transform: translateX(3px); color: var(--accent); }
+
+        .svc-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+        .svc-row:last-child { border-bottom: none; }
+        .svc-name { flex: 1 1 auto; min-width: 0; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .svc-meta { font-size: 11.5px; color: var(--text-mute); font-family: var(--mono); white-space: nowrap; }
+
+        @media (max-width: 1080px) {
+            .hw-top { flex-direction: column; align-items: flex-start; gap: 10px; }
+            .hw-versions { grid-template-columns: repeat(2, 1fr); gap: 10px 0; }
+            .hw-ver:nth-child(3) { border-left: none; padding-left: 0; }
+            .hw-ver { padding-right: 12px; }
+        }
+        @media (max-width: 992px) { .stat-grid { grid-template-columns: repeat(3, 1fr); } .cols { grid-template-columns: 1fr; } }
+        @media (max-width: 576px) {
+            .stat-value { font-size: 22px; }
+            .hw-hero { padding: 12px 14px 10px; }
+            .hw-soc { font-size: 20px; }
+            .hw-versions { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+{% end %}
+
+{% block content %}
+    <!-- Rockchip 硬件加速（紧凑两行） -->
+    <section class="hw-hero">
+        <div class="hw-top">
+            <div class="hw-id">
+                <span class="hw-eyebrow"><i class="bi bi-gpu-card"></i>Rockchip</span>
+                <span class="hw-soc" id="hw-soc-name">—</span>
+                <span class="hw-id-meta">
+                    <span class="mono" id="hw-npu-cores">—</span>
+                    <span class="sep"></span>
+                    <span class="mono" id="hw-npu-driver">—</span>
+                </span>
+            </div>
+            <div class="hw-npu-inline" id="hw-npu-load">
+                <span class="npuc"><span class="npuc-name">NPU</span><span class="meter"><div style="width:0%"></div></span><span class="npuc-val">…</span></span>
+            </div>
+        </div>
+        <div class="hw-versions">
+            <div class="hw-ver">
+                <span class="hw-ver-label"><i class="bi bi-stack"></i>RKLLM</span>
+                <span class="hw-ver-val" id="hw-rkllm">—</span>
+            </div>
+            <div class="hw-ver">
+                <span class="hw-ver-label"><i class="bi bi-box"></i>RKNN</span>
+                <span class="hw-ver-val" id="hw-rknn">—</span>
+            </div>
+            <div class="hw-ver">
+                <span class="hw-ver-label"><i class="bi bi-badge-hd"></i>MPP</span>
+                <span class="hw-ver-val" id="hw-mpp">—</span>
+            </div>
+            <div class="hw-ver">
+                <span class="hw-ver-label"><i class="bi bi-arrows-angle-expand"></i>RGA</span>
+                <span class="hw-ver-val" id="hw-rga">—</span>
+            </div>
+        </div>
+    </section>
+
+    <div class="stat-grid">
+        <div class="stat">
+            <div class="stat-label"><i class="bi bi-collection-play"></i>启用服务</div>
+            <div class="stat-value" id="stat-services">—</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label"><i class="bi bi-play-circle"></i>运行中实例</div>
+            <div class="stat-value" id="stat-running">—</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label"><i class="bi bi-file-earmark-binary"></i>模型文件</div>
+            <div class="stat-value" id="stat-models">—</div>
+        </div>
+    </div>
+
+    <div class="cols">
+        <div class="panel">
+            <div class="panel-h">
+                <span class="t">系统状态</span>
+                <span class="section-title">实时</span>
+            </div>
+            <div class="meter-row">
+                <div class="meter-head">
+                    <span class="meter-name"><i class="bi bi-cpu"></i>CPU</span>
+                    <span class="meter-val" id="home-cpu-usage">0%</span>
+                </div>
+                <div class="meter"><div id="home-cpu-progress" style="width:0%"></div></div>
+                <div class="meter-sub" id="home-cpu-info">加载中…</div>
+            </div>
+            <div class="meter-row">
+                <div class="meter-head">
+                    <span class="meter-name"><i class="bi bi-memory"></i>内存</span>
+                    <span class="meter-val" id="home-mem-usage">0%</span>
+                </div>
+                <div class="meter"><div id="home-mem-progress" style="width:0%"></div></div>
+                <div class="meter-sub" id="home-mem-info">加载中…</div>
+            </div>
+            <div class="meter-row">
+                <div class="meter-head">
+                    <span class="meter-name"><i class="bi bi-hdd"></i>磁盘</span>
+                    <span class="meter-val" id="home-disk-usage">0%</span>
+                </div>
+                <div class="meter"><div id="home-disk-progress" style="width:0%"></div></div>
+                <div class="meter-sub" id="home-disk-info">加载中…</div>
+            </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:14px;">
+            <div class="panel">
+                <div class="panel-h" style="margin-bottom:8px;"><span class="t">快速开始</span></div>
+                <a href="/chat/" class="quick">
+                    <div class="quick-ic"><i class="bi bi-terminal"></i></div>
+                    <div class="quick-tx"><b>模型对话</b><span>验证 OpenAI 兼容接口</span></div>
+                    <i class="bi bi-arrow-right quick-ar"></i>
+                </a>
+                <a href="/models/" class="quick">
+                    <div class="quick-ic"><i class="bi bi-hdd-stack"></i></div>
+                    <div class="quick-tx"><b>推理服务</b><span>上传模型 · 启动 · 停止</span></div>
+                    <i class="bi bi-arrow-right quick-ar"></i>
+                </a>
+            </div>
+
+            <div class="panel">
+                <div class="panel-h" style="margin-bottom:8px;"><span class="t">运行中实例</span></div>
+                <div id="running-list"><div class="empty" style="padding:24px 0;"><i class="bi bi-inbox"></i>加载中…</div></div>
+            </div>
+        </div>
+    </div>
+{% end %}
+
+{% block scripts %}
+    <script>
+        function updateStats() {
+            fetch('/api/active-services/').then(function (r) { return r.json(); }).then(function (d) {
+                if (d.status === 'success') document.getElementById('stat-services').textContent = (d.services || []).length;
+            }).catch(function () {});
+
+            fetch('/models/api/files/').then(function (r) { return r.json(); }).then(function (d) {
+                if (d.status === 'success') document.getElementById('stat-models').textContent = (d.files || []).length;
+            }).catch(function () {});
+
+            fetch('/models/api/services/').then(function (r) { return r.json(); }).then(function (d) {
+                if (d.status !== 'success') return;
+                var list = d.services || [], running = [], html = '';
+                for (var i = 0; i < list.length; i++) {
+                    if (list[i].status === 'running') running.push(list[i]);
+                }
+                document.getElementById('stat-running').textContent = running.length;
+                if (!running.length) {
+                    html = '<div class="empty" style="padding:24px 0;"><i class="bi bi-inbox"></i>暂无运行中的实例</div>';
+                } else {
+                    for (var j = 0; j < running.length; j++) {
+                        var s = running[j];
+                        html += '<div class="svc-row">'
+                            + '<span class="svc-name">' + (s.name || '') + '</span>'
+                            + '<span class="svc-meta">' + (s.port ? (':' + s.port) : '') + '</span>'
+                            + '<span class="chip chip-ok">运行中</span></div>';
+                    }
+                }
+                document.getElementById('running-list').innerHTML = html;
+            }).catch(function () {});
+        }
+
+        function setMeter(usageId, barId, pct) {
+            document.getElementById(usageId).textContent = pct.toFixed(1) + '%';
+            var bar = document.getElementById(barId);
+            bar.style.width = Math.min(pct, 100) + '%';
+            bar.style.background = pct > 85 ? 'var(--err)' : '';
+        }
+        function updateSystemStats(data) {
+            setMeter('home-cpu-usage', 'home-cpu-progress', data.cpu_usage || 0);
+            document.getElementById('home-cpu-info').textContent = data.cpu_model || '未知型号';
+            setMeter('home-mem-usage', 'home-mem-progress', data.memory_usage || 0);
+            document.getElementById('home-mem-info').textContent = '总量 ' + data.total_mem + ' GB';
+            if (data.disk) {
+                setMeter('home-disk-usage', 'home-disk-progress', data.disk.usage || 0);
+                document.getElementById('home-disk-info').textContent = data.disk.used + ' / ' + data.disk.total + ' GB';
+            }
+        }
+        function fetchSystemStats() {
+            fetch('/api/stats/').then(function (r) { return r.json(); }).then(updateSystemStats).catch(function () {});
+        }
+
+        function renderNpuLoad(cores, coreCount) {
+            var box = document.getElementById('hw-npu-load');
+            if (!cores || !cores.length) {
+                box.innerHTML = '<span class="npuc"><span class="npuc-name">NPU</span><span class="npuc-val" style="color:var(--text-mute)">未检测到负载</span></span>';
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < cores.length; i++) {
+                var c = cores[i], load = c.load || 0;
+                var color = load > 85 ? 'var(--err)' : 'var(--accent)';
+                html += '<span class="npuc">'
+                    + '<span class="npuc-name">NPU ' + c.core + '</span>'
+                    + '<span class="meter"><div style="width:' + Math.min(load, 100) + '%;background:' + color + '"></div></span>'
+                    + '<span class="npuc-val">' + load + '%</span>'
+                    + '</span>';
+            }
+            box.innerHTML = html;
+        }
+        function fetchHardware() {
+            fetch('/api/hardware/').then(function (r) { return r.json(); }).then(function (d) {
+                if (!d || d.status !== 'success') return;
+                var h = d.hardware || {};
+                document.getElementById('hw-soc-name').textContent = (h.soc || 'Unknown').toUpperCase();
+                document.getElementById('hw-npu-cores').textContent =
+                    h.npu_core_count ? (h.npu_core_count + ' × NPU') : 'NPU —';
+                document.getElementById('hw-npu-driver').textContent =
+                    (h.npu_driver || '—').replace(/^RKNPU driver:\s*/i, 'RKNPU ');
+                document.getElementById('hw-mpp').textContent = h.mpp_version || '—';
+                document.getElementById('hw-rga').textContent = h.rga_version || '—';
+                document.getElementById('hw-rknn').textContent = h.rknn_version || '—';
+                document.getElementById('hw-rkllm').textContent = h.rkllm_version || '—';
+                renderNpuLoad(h.npu_cores, h.npu_core_count);
+            }).catch(function () {});
+        }
+
+        /* 统一刷新频率：CPU/内存/磁盘/NPU 同频轮询，右上角可调（默认 6 秒） */
+        var rateSel = document.getElementById('refresh-rate');
+        var savedRate = localStorage.getItem('ytllm-hw-interval');
+        var hwInterval = parseInt(savedRate || '6', 10);
+        if (!(hwInterval >= 0)) hwInterval = 6;
+        var hwAuto = localStorage.getItem('ytllm-hw-auto');
+        if (hwAuto === '0') hwInterval = 0;
+        rateSel.value = String(hwInterval);
+
+        var pollTimers = [];
+        function restartPolling() {
+            pollTimers.forEach(clearInterval);
+            pollTimers = [];
+            fetchSystemStats();
+            fetchHardware();
+            var v = parseInt(rateSel.value, 10) || 0;
+            localStorage.setItem('ytllm-hw-interval', String(v || 6));
+            localStorage.setItem('ytllm-hw-auto', v > 0 ? '1' : '0');
+            if (v > 0) {
+                pollTimers.push(setInterval(fetchSystemStats, v * 1000));
+                pollTimers.push(setInterval(fetchHardware, v * 1000));
+            }
+        }
+        rateSel.addEventListener('change', restartPolling);
+
+        updateStats();
+        setInterval(updateStats, 30000);
+        restartPolling();
+    </script>
+{% end %}

@@ -1,0 +1,23 @@
+# --- 管理平台 (ytllm/server.py) ---
+tornado>=6.4.0
+openai>=1.0.0
+psutil>=5.9.0
+requests>=2.32.0
+Pillow>=12.1.0
+aiohappyeyeballs>=2.6.0
+aiohttp>=3.13.0
+aiosignal>=1.4.0
+asgiref>=3.11.0
+async-timeout>=5.0.0
+attrs>=25.4.0
+frozenlist>=1.8.0
+multidict>=6.7.0
+propcache>=0.4.0
+yarl>=1.22.0
+
+# --- 推理引擎 (ytllm/engine/rkllm_engine.py) ---
+flask>=3.0.0
+numpy>=2.0.0
+pyyaml>=6.0
+# 只有多模态模型（配 .rknn 视觉模型）才需要，纯文本模型可以不装
+opencv-python-headless>=4.10.0

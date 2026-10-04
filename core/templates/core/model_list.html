@@ -1,0 +1,962 @@
+{% extends "base.html" %}
+
+{% block title %}ytllm - 推理服务{% end %}
+{% block nav-models %}active{% end %}
+{% block page_title %}推理服务{% end %}
+{% block styles %}
+    <style>
+        .page-body { display: flex; flex-direction: column; gap: 14px; }
+        .stack-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+        .stack-head .title { font-size: 14.5px; font-weight: 600; }
+        .stack-head .sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+
+        .status-cell { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; }
+        .mono { font-family: var(--mono); font-size: .78rem; color: var(--text-mute); }
+        .btn-icon { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-xs); }
+        .svc-line { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-dim); }
+        .table-foot { padding: 13px 20px; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); }
+        .table-foot .num { font-weight: 600; color: var(--text); }
+        .table-foot .ok { color: var(--ok); }
+
+        /* 桌面端放开 overflow，避免表格裁剪「更多」下拉菜单（编辑/删除在底部被挡） */
+        @media (min-width: 769px) {
+            .table-responsive { overflow: visible; }
+        }
+        .dropdown-menu { z-index: 1050; }
+
+        /* 移动端：表格转卡片 */
+        @media (max-width: 768px) {
+            .stack-table thead { display: none; }
+            .stack-table tbody tr { display: block; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin: 0 14px 12px; }
+            .stack-table tbody td { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; border: none !important; padding: 5px 0 !important; text-align: left !important; min-width: 0; overflow-wrap: anywhere; }
+            .stack-table tbody td .mono { white-space: normal; word-break: break-all; }
+            .stack-table tbody td::before { content: attr(data-label); color: var(--text-mute); font-size: .74rem; flex-shrink: 0; }
+            .stack-table tbody td.cell-title { display: block; padding: 0 0 4px !important; }
+            .stack-table tbody td.cell-title::before { display: none; }
+            .stack-table tbody td.cell-actions { justify-content: flex-end; padding-top: 10px !important; border-top: 1px solid var(--border) !important; margin-top: 8px; }
+            .stack-table tbody td.cell-actions::before { display: none; }
+            .table-responsive { padding: 2px 0; }
+        }
+        @media (max-width: 576px) { .stack-table tbody tr { margin: 0 10px 10px; padding: 10px 12px; } }
+    </style>
+{% end %}
+
+{% block content %}
+        <div class="page-body">
+            <div class="card mb-0">
+                <div class="stack-head">
+                    <div>
+                        <div class="title">推理服务</div>
+                        <div class="sub">上传模型、启动实例、测试接口</div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <div class="input-group input-group-sm" style="width:200px;">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" id="service-filter" class="form-control" placeholder="搜索服务...">
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="add-service-btn"><i class="bi bi-plus-lg me-1"></i>添加服务</button>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 stack-table">
+                        <thead>
+                            <tr>
+                                <th class="ps-4">服务名称</th>
+                                <th>类型</th>
+                                <th>模型 / 地址</th>
+                                <th>状态</th>
+                                <th class="pe-4 text-end" style="width:230px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="service-table-body">
+                            <tr><td colspan="5" class="text-center py-5"><div class="spinner-border" role="status"></div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="table-foot">
+                    <i class="bi bi-hdd-stack-fill me-2" style="color:var(--accent);"></i>
+                    共 <span class="num" id="service-count">0</span> 个服务
+                    <span class="ms-2">| 运行中: <span class="num ok" id="running-count">0</span></span>
+                </div>
+            </div>
+
+            <div class="card mb-0">
+                <div class="stack-head">
+                    <div>
+                        <div class="title">模型仓库</div>
+                        <div class="sub" id="disk-hint">models/ 目录</div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-soft btn-sm" id="refresh-files-btn"><i class="bi bi-arrow-clockwise"></i></button>
+                        <button class="btn btn-primary btn-sm" id="upload-model-btn"><i class="bi bi-cloud-arrow-up me-1"></i>上传模型</button>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 stack-table">
+                        <thead>
+                            <tr>
+                                <th class="ps-4">文件名</th>
+                                <th>类型</th>
+                                <th>大小</th>
+                                <th>上传时间</th>
+                                <th class="pe-4 text-end" style="width:110px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="file-table-body">
+                            <tr><td colspan="5" class="text-center py-4"><div class="spinner-border spinner-border-sm" role="status"></div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    <!-- 添加 / 编辑服务 -->
+    <div class="modal fade" id="serviceModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered" style="max-width:620px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="serviceModalLabel">添加推理服务</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="service-id" value="">
+                    <input type="hidden" id="service-type" value="local">
+
+                    <div class="btn-group w-100 mb-4" role="group" id="type-switch">
+                        <button type="button" class="btn btn-sm btn-primary" data-type="local">本地引擎（RKLLM）</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-type="remote">远程接入</button>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">服务名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="svc-name" placeholder="例如：Qwen3-VL-4B">
+                    </div>
+
+                    <div id="local-fields">
+                        <div class="mb-3">
+                            <label class="form-label">语言模型 (.rkllm) <span class="text-danger">*</span></label>
+                            <select class="form-select form-select-sm" id="svc-model-name"></select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">视觉模型 (.rknn，可选)</label>
+                            <select class="form-select form-select-sm" id="svc-vision-name"></select>
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label">平台</label>
+                                <select class="form-select form-select-sm" id="svc-platform">
+                                    <option value="rk3576">RK3576</option>
+                                    <option value="rk3588">RK3588</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">NPU 核心数</label>
+                                <select class="form-select form-select-sm" id="svc-rknn-cores">
+                                    <option value="1">1</option>
+                                    <option value="2" selected>2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">模型 ID <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" id="svc-model-id" placeholder="调用 API 时的模型标识符，如 qwen3-vl-4b">
+                        </div>
+
+                        <div class="mb-2">
+                            <a class="small text-decoration-none text-primary" data-bs-toggle="collapse" href="#advParams" role="button">
+                                <i class="bi bi-sliders me-1"></i>高级推理参数
+                            </a>
+                        </div>
+                        <div class="collapse" id="advParams">
+                            <div class="row g-2 mb-3 p-3" style="background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border);">
+                                <div class="col-6">
+                                    <label class="form-label mb-1">最大上下文</label>
+                                    <input type="number" class="form-control form-control-sm" id="p-max-context" value="4096">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label mb-1">最大生成 Tokens</label>
+                                    <input type="number" class="form-control form-control-sm" id="p-max-tokens" value="512">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label mb-1">Temperature</label>
+                                    <input type="number" step="0.1" class="form-control form-control-sm" id="p-temperature" value="0.8">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label mb-1">Top-P</label>
+                                    <input type="number" step="0.05" class="form-control form-control-sm" id="p-top-p" value="0.9">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label mb-1">Top-K</label>
+                                    <input type="number" class="form-control form-control-sm" id="p-top-k" value="1">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label mb-1">重复惩罚</label>
+                                    <input type="number" step="0.05" class="form-control form-control-sm" id="p-repeat-penalty" value="1.1">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="remote-fields" style="display:none;">
+                        <div class="mb-3">
+                            <label class="form-label">API 地址 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" id="svc-base-url" placeholder="http://192.168.1.100:9696/v1">
+                            <div class="form-text">OpenAI 兼容地址，自动补全 /v1 后缀</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">API Key</label>
+                            <input type="text" class="form-control form-control-sm" id="svc-api-key" value="sk-ytllm">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">模型 ID <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" id="svc-remote-model-id" placeholder="例如：deepseek-v3">
+                        </div>
+                    </div>
+
+                    <div class="mb-0">
+                        <label class="form-label">备注</label>
+                        <textarea class="form-control form-control-sm" id="svc-description" rows="2" placeholder="可选"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-soft btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="saveServiceBtn"><i class="bi bi-check-lg me-1"></i>保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 上传模型 -->
+    <div class="modal fade" id="uploadModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered" style="max-width:520px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">上传模型</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" id="upload-close-btn"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <input type="file" class="form-control form-control-sm" id="upload-file-input" accept=".rkllm,.rknn">
+                        <div class="form-text">支持 .rkllm / .rknn，大文件自动分片上传</div>
+                    </div>
+                    <div id="upload-status" style="display:none;">
+                        <div class="d-flex justify-content-between small mb-2">
+                            <span id="upload-filename" class="text-muted"></span>
+                            <span id="upload-percent" class="fw-bold" style="color:var(--accent);">0%</span>
+                        </div>
+                        <div class="upload-progress"><div id="upload-bar"></div></div>
+                        <div class="small text-muted mt-2" id="upload-detail"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-soft btn-sm" data-bs-dismiss="modal" id="upload-cancel-btn">关闭</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="start-upload-btn"><i class="bi bi-cloud-arrow-up me-1"></i>开始上传</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志 -->
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="logPanel" style="width:640px;max-width:92vw;">
+        <div class="offcanvas-header" style="border-bottom:1px solid var(--border);">
+            <h5 class="offcanvas-title" id="log-title">运行日志</h5>
+            <div class="d-flex gap-2 align-items-center">
+                <select class="form-select form-select-sm" id="log-lines" style="width:110px;">
+                    <option value="100">最近 100 行</option>
+                    <option value="300" selected>最近 300 行</option>
+                    <option value="1000">最近 1000 行</option>
+                </select>
+                <button class="btn btn-soft btn-sm" id="log-refresh-btn"><i class="bi bi-arrow-clockwise"></i></button>
+                <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+            </div>
+        </div>
+        <div class="offcanvas-body p-0">
+            <pre id="log-content" class="m-0 p-3" style="font-size:.76rem;line-height:1.6;white-space:pre-wrap;word-break:break-all;height:100%;overflow:auto;color:var(--text-dim);"></pre>
+        </div>
+    </div>
+
+    <style>
+        .api-field { margin-bottom: 14px; }
+        .api-field .form-label { font-size: 12px; color: var(--text-dim); margin-bottom: 5px; font-weight: 600; }
+        .api-field .form-label .text-mute { font-weight: 400; color: var(--text-mute); }
+        .code-wrap { position: relative; }
+        .code-block { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 12px; font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; color: var(--text-dim); margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        .code-copy { position: absolute; top: 6px; right: 6px; z-index: 2; }
+        .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+
+    <!-- 删除确认 -->
+    <div class="modal fade" id="deleteServiceModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered" style="max-width:400px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title mb-0"><i class="bi bi-exclamation-triangle text-danger me-2"></i>删除服务</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-1">确定删除服务 <strong id="del-svc-name"></strong> 吗？</p>
+                    <p class="text-muted small mb-0">若为本地引擎，其推理进程会一并停止；已删除的服务无法恢复，请谨慎操作。</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-soft btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-danger btn-sm" id="confirm-delete-btn">删除</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 复制对外接口 -->
+    <div class="modal fade" id="apiModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="max-width:560px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title mb-0"><i class="bi bi-box-arrow-up-right me-2"></i>对外接口</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">将本服务的调用入口提供给外部程序（OpenAI SDK / ChatBox / Dify 等）。<b>无需任何自定义请求头</b>——在 <code>model</code> 字段填下方模型名称即可定位本服务。</p>
+                    <div class="api-field">
+                        <label class="form-label">接口地址</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control font-mono" id="api-url" readonly>
+                            <button class="btn btn-soft copy-btn" type="button" data-copy="api-url"><i class="bi bi-clipboard"></i></button>
+                        </div>
+                    </div>
+                    <div class="api-field">
+                        <label class="form-label">模型名称 <span class="text-mute">(model 字段填这个)</span></label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control font-mono" id="api-model" readonly>
+                            <button class="btn btn-soft copy-btn" type="button" data-copy="api-model"><i class="bi bi-clipboard"></i></button>
+                        </div>
+                    </div>
+                    <div class="api-field">
+                        <label class="form-label">curl 示例</label>
+                        <div class="code-wrap">
+                            <button class="btn btn-soft btn-sm copy-btn code-copy" type="button" data-copy="api-curl"><i class="bi bi-clipboard"></i> 复制</button>
+                            <pre id="api-curl" class="code-block"></pre>
+                        </div>
+                    </div>
+                    <div class="api-field" style="margin-bottom:0;">
+                        <label class="form-label">Python 示例 (openai SDK)</label>
+                        <div class="code-wrap">
+                            <button class="btn btn-soft btn-sm copy-btn code-copy" type="button" data-copy="api-python"><i class="bi bi-clipboard"></i> 复制</button>
+                            <pre id="api-python" class="code-block"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% end %}
+
+{% block scripts %}
+    <script>
+    (function(){
+        var allServices = [];
+        var allFiles = [];
+        var currentType = 'local';
+        var logServiceId = null;
+        var logTimer = null;
+
+        var CHUNK_SIZE = 8 * 1024 * 1024;
+        var SRV = '/models/api/services/';
+
+        function escapeHtml(text) {
+            var d = document.createElement('div');
+            d.textContent = text == null ? '' : String(text);
+            return d.innerHTML;
+        }
+
+        function showToast(message, type) {
+            var bg = type === 'success' ? 'linear-gradient(135deg,#4ade80 0%,#22c55e 100%)' : type === 'error' ? 'linear-gradient(135deg,#f87171 0%,#ef4444 100%)' : 'linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%)';
+            var icon = type === 'success' ? 'bi-check-circle-fill' : type === 'error' ? 'bi-x-circle-fill' : 'bi-exclamation-circle-fill';
+            var t = document.createElement('div');
+            t.style.cssText = 'position:fixed;top:80px;left:50%;transform:translateX(-50%);max-width:min(680px,90vw);background:' + bg + ';color:#fff;padding:12px 22px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.25);font-size:13.5px;font-weight:500;z-index:99999;white-space:pre-wrap;line-height:1.55;';
+            t.innerHTML = '<i class="bi ' + icon + ' me-2"></i>' + escapeHtml(message);
+            document.body.appendChild(t);
+            setTimeout(function(){ t.style.opacity = '0'; setTimeout(function(){ t.remove(); }, 300); }, type === 'error' ? 6000 : 2600);
+        }
+
+        function statusMeta(s) {
+            if (s.service_type !== 'local') {
+                if (s.last_status === 'online') return { color:'#22c55e', text:'在线' };
+                if (s.last_status === 'offline') return { color:'#ef4444', text:'离线' };
+                return { color:'#94a3b8', text:'未检测' };
+            }
+            if (s.status === 'running') return { color:'#22c55e', text:'运行中' };
+            if (s.status === 'starting') return { color:'#f59e0b', text:'启动中' };
+            if (s.status === 'error') return { color:'#ef4444', text:'启动失败' };
+            return { color:'#94a3b8', text:'已停止' };
+        }
+
+        // ---------- 服务列表 ----------
+        function loadServices() {
+            $.get(SRV, function(data) {
+                if (data.status === 'success') {
+                    allServices = data.services || [];
+                    renderServices();
+                }
+            });
+        }
+
+        function renderServices() {
+            var $tbody = $('#service-table-body');
+            var running = 0;
+            for (var i = 0; i < allServices.length; i++) {
+                if (allServices[i].service_type === 'local' && allServices[i].status === 'running') running++;
+            }
+            $('#service-count').text(allServices.length);
+            $('#running-count').text(running);
+
+            if (!allServices.length) {
+                $tbody.html('<tr><td colspan="5"><div class="empty-hint"><i class="bi bi-cloud-plus fs-1 d-block mb-3"></i><div>暂无推理服务</div><div class="small mt-1">先上传模型，再点击「添加服务」创建本地推理实例</div></div></td></tr>');
+                return;
+            }
+
+            var html = '';
+            for (var i = 0; i < allServices.length; i++) {
+                var s = allServices[i];
+                var isLocal = s.service_type === 'local';
+                var meta = statusMeta(s);
+
+                html += '<tr class="service-row" data-name="' + escapeHtml((s.name || '').toLowerCase()) + '">';
+
+                html += '<td class="ps-4 cell-title"><div class="fw-bold" style="font-size:13.5px;">' + escapeHtml(s.name) + '</div>';
+                if (s.description) {
+                    html += '<div class="text-muted" style="font-size:.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(s.description) + '</div>';
+                }
+                html += '</td>';
+
+                html += '<td data-label="类型"><span class="text-muted small">' + (isLocal ? '本地引擎' : '远程接入') + '</span></td>';
+
+                html += '<td data-label="模型 / 地址">';
+                if (isLocal) {
+                    html += '<div class="small">' + escapeHtml((s.model_path || '').split(/[\\/]/).pop() || '—') + '</div>';
+                    if (s.vision_model_path) {
+                        html += '<div class="mono">+ ' + escapeHtml(s.vision_model_path.split(/[\\/]/).pop()) + '</div>';
+                    }
+                } else {
+                    html += '<div class="mono">' + escapeHtml(s.base_url) + '</div>';
+                }
+                html += '</td>';
+
+                html += '<td data-label="状态"><span class="status-cell" title="' + escapeHtml(s.last_error || meta.text) + '">'
+                     +  '<span class="dot" style="background:' + meta.color + '"></span>'
+                     +  '<span class="text-muted">' + meta.text + '</span></span>';
+                if (s.status === 'error' && s.last_error) {
+                    html += '<div class="mono" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ef4444;">' + escapeHtml(s.last_error.split('\n').pop()) + '</div>';
+                }
+                html += '</td>';
+
+                html += '<td class="pe-4 text-end cell-actions"><div class="d-inline-flex gap-2 align-items-center" style="justify-content:flex-end;">';
+
+                if (isLocal) {
+                    if (s.status === 'running') {
+                        html += '<button class="btn btn-sm btn-outline-danger act-btn" data-act="stop" data-sid="' + s.id + '"><i class="bi bi-stop-fill me-1"></i>停止</button>';
+                    } else {
+                        html += '<button class="btn btn-sm btn-primary act-btn" data-act="start" data-sid="' + s.id + '"><i class="bi bi-power me-1"></i>启动</button>';
+                    }
+                }
+
+                html += '<a class="btn btn-sm btn-outline-secondary btn-icon" href="/chat/?service=' + encodeURIComponent(s.id) + '" title="模型对话"><i class="bi bi-play-fill"></i></a>';
+
+                html += '<button class="btn btn-sm btn-outline-secondary btn-icon edit-btn" data-sid="' + s.id + '" title="编辑"><i class="bi bi-pencil"></i></button>';
+
+                html += '<div class="dropdown">';
+                html += '<button class="btn btn-sm btn-outline-secondary btn-icon" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false" title="更多操作"><i class="bi bi-three-dots"></i></button>';
+                html += '<ul class="dropdown-menu dropdown-menu-end">';
+                if (isLocal) {
+                    if (s.status === 'running') {
+                        html += '<li><button type="button" class="dropdown-item act-btn" data-act="restart" data-sid="' + s.id + '"><i class="bi bi-arrow-repeat me-2"></i>重启</button></li>';
+                        html += '<li><button type="button" class="dropdown-item log-btn" data-sid="' + s.id + '"><i class="bi bi-terminal me-2"></i>运行日志</button></li>';
+                    } else {
+                        html += '<li><button type="button" class="dropdown-item log-btn" data-sid="' + s.id + '"><i class="bi bi-terminal me-2"></i>运行日志</button></li>';
+                    }
+                } else {
+                    html += '<li><button type="button" class="dropdown-item act-btn" data-act="check" data-sid="' + s.id + '"><i class="bi bi-wifi me-2"></i>检测连通性</button></li>';
+                }
+                html += '<li><button type="button" class="dropdown-item copy-api-btn" data-sid="' + s.id + '"><i class="bi bi-clipboard-check me-2"></i>复制对外接口</button></li>';
+                html += '<li><hr class="dropdown-divider"></li>';
+                html += '<li><button type="button" class="dropdown-item text-danger delete-btn" data-sid="' + s.id + '" data-sname="' + escapeHtml(s.name) + '"><i class="bi bi-trash me-2"></i>删除</button></li>';
+                html += '</ul></div>';
+
+                html += '</div></td></tr>';
+            }
+            $tbody.html(html);
+        }
+
+        $('#service-filter').on('input', function() {
+            var kw = $(this).val().toLowerCase().trim();
+            $('.service-row').each(function() {
+                var n = $(this).data('name') || '';
+                $(this).toggle(!kw || n.indexOf(kw) >= 0);
+            });
+        });
+
+        // ---------- 启动 / 停止 / 重启 / 检测 ----------
+        var ACT_TEXT = { start:'启动中…', stop:'停止中…', restart:'重启中…', check:'检测中…' };
+
+        $(document).on('click', '.act-btn', function() {
+            var sid = $(this).data('sid');
+            var act = $(this).data('act');
+            var $row = $(this).closest('tr');
+            var isHeavy = (act === 'start' || act === 'restart');
+            if (isHeavy) {
+                $row.find('.act-btn, .edit-btn, .delete-btn').prop('disabled', true);
+                showToast(ACT_TEXT[act] + '模型加载需要一些时间，请稍候', 'info');
+            }
+            $.post(SRV + sid + '/' + act + '/', function(res) {
+                if (res.status === 'success') {
+                    showToast(res.message || '操作完成', 'success');
+                } else {
+                    showToast(res.message || '操作失败', 'error');
+                }
+            }).fail(function(xhr) {
+                showToast('请求失败：' + (xhr.status || '') + ' ' + (xhr.statusText || ''), 'error');
+            }).always(function() {
+                loadServices();
+            });
+        });
+
+        // ---------- 日志 ----------
+        $(document).on('click', '.log-btn', function() {
+            logServiceId = $(this).data('sid');
+            var svc = null;
+            for (var i = 0; i < allServices.length; i++) {
+                if (allServices[i].id === logServiceId) { svc = allServices[i]; break; }
+            }
+            $('#log-title').text('运行日志' + (svc ? ' · ' + svc.name : ''));
+            loadLog();
+            new bootstrap.Offcanvas(document.getElementById('logPanel')).show();
+        });
+
+        function loadLog() {
+            if (!logServiceId) return;
+            var lines = $('#log-lines').val() || 300;
+            $.get(SRV + logServiceId + '/logs/?lines=' + lines, function(res) {
+                var text = (res.logs || []).join('\n');
+                var $c = $('#log-content');
+                $c.text(text || '（暂无日志）');
+                $c.scrollTop($c[0].scrollHeight);
+            });
+        }
+
+        $('#log-refresh-btn').on('click', loadLog);
+        $('#log-lines').on('change', loadLog);
+        $('#logPanel').on('shown.bs.offcanvas', function() {
+            logTimer = setInterval(loadLog, 5000);
+        }).on('hidden.bs.offcanvas', function() {
+            clearInterval(logTimer);
+            logServiceId = null;
+        });
+
+        // ---------- 模型仓库 ----------
+        function loadFiles() {
+            $.get('/models/api/files/', function(data) {
+                if (data.status !== 'success') return;
+                allFiles = data.files || [];
+                renderFiles();
+                var d = data.disk || {};
+                $('#disk-hint').text('models/ 目录 · 已占用 ' + (d.models_human || '0 B') + ' · 磁盘剩余 ' + (d.disk_free || '—') + '（' + (d.disk_total || '—') + '）');
+                refreshModelSelects();
+            });
+        }
+
+        function renderFiles() {
+            var $tbody = $('#file-table-body');
+            if (!allFiles.length) {
+                $tbody.html('<tr><td colspan="5"><div class="empty-hint"><i class="bi bi-inbox fs-2 d-block mb-2"></i><div class="small">还没有模型文件</div></div></td></tr>');
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < allFiles.length; i++) {
+                var f = allFiles[i];
+                html += '<tr>';
+                html += '<td class="ps-4 cell-title"><span class="small">' + escapeHtml(f.name) + '</span></td>';
+                html += '<td data-label="类型"><span class="text-muted small">' + escapeHtml(f.suffix.toUpperCase()) + '</span></td>';
+                html += '<td data-label="大小"><span class="small">' + escapeHtml(f.size_human) + '</span></td>';
+                html += '<td data-label="上传时间"><span class="text-muted small">' + escapeHtml(f.mtime) + '</span></td>';
+                html += '<td class="pe-4 text-end cell-actions"><button class="btn btn-sm btn-outline-secondary btn-icon file-del-btn" data-fname="' + escapeHtml(f.name) + '" title="删除"><i class="bi bi-trash"></i></button></td>';
+                html += '</tr>';
+            }
+            $tbody.html(html);
+        }
+
+        function refreshModelSelects() {
+            var llm = '<option value="">（未选择）</option>';
+            var vision = '<option value="">（不使用）</option>';
+            for (var i = 0; i < allFiles.length; i++) {
+                var f = allFiles[i];
+                var opt = '<option value="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '  (' + escapeHtml(f.size_human) + ')</option>';
+                if (f.suffix === 'rkllm') llm += opt;
+                else vision += opt;
+            }
+            var curLlm = $('#svc-model-name').val();
+            var curVision = $('#svc-vision-name').val();
+            $('#svc-model-name').html(llm).val(curLlm || '');
+            $('#svc-vision-name').html(vision).val(curVision || '');
+        }
+
+        $('#refresh-files-btn').on('click', loadFiles);
+
+        $(document).on('click', '.file-del-btn', function() {
+            var fname = $(this).data('fname');
+            if (!confirm('确定删除模型文件「' + fname + '」？此操作不可恢复。')) return;
+            $.ajax({
+                url: '/models/api/files/delete/',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ name: fname }),
+                success: function(res) {
+                    if (res.status === 'success') { showToast('模型已删除', 'success'); loadFiles(); }
+                    else showToast(res.message || '删除失败', 'error');
+                },
+                error: function() { showToast('网络错误', 'error'); }
+            });
+        });
+
+        // ---------- 上传 ----------
+        $('#upload-model-btn').on('click', function() {
+            $('#upload-file-input').val('');
+            $('#upload-status').hide();
+            $('#upload-bar').css('width', '0');
+            $('#start-upload-btn').prop('disabled', false).html('<i class="bi bi-cloud-arrow-up me-1"></i>开始上传');
+            new bootstrap.Modal(document.getElementById('uploadModal')).show();
+        });
+
+        $('#start-upload-btn').on('click', function() {
+            var file = $('#upload-file-input')[0].files[0];
+            if (!file) { showToast('请先选择模型文件', 'error'); return; }
+
+            var name = file.name.toLowerCase();
+            if (!(name.endsWith('.rkllm') || name.endsWith('.rknn'))) {
+                showToast('仅支持 .rkllm / .rknn 文件', 'error');
+                return;
+            }
+
+            var uploadId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+            var total = Math.ceil(file.size / CHUNK_SIZE);
+            var index = 0;
+
+            $('#upload-status').show();
+            $('#upload-filename').text(file.name);
+            $('#start-upload-btn').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>上传中…');
+
+            function fail(msg) {
+                showToast('上传失败：' + msg, 'error');
+                $('#start-upload-btn').prop('disabled', false).html('<i class="bi bi-cloud-arrow-up me-1"></i>重新上传');
+            }
+
+            function sendChunk() {
+                var blob = file.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE);
+                var url = '/models/api/files/upload/?upload_id=' + encodeURIComponent(uploadId)
+                        + '&filename=' + encodeURIComponent(file.name)
+                        + '&index=' + index + '&total=' + total;
+
+                fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/octet-stream' },
+                    body: blob
+                })
+                    .then(function(r) { return r.json(); })
+                    .then(function(res) {
+                        if (res.status !== 'success') { fail(res.message || '服务端拒绝'); return; }
+                        index++;
+                        var pct = Math.round(index / total * 100);
+                        $('#upload-bar').css('width', pct + '%');
+                        $('#upload-percent').text(pct + '%');
+                        $('#upload-detail').text('已上传 ' + index + ' / ' + total + ' 片');
+                        if (index < total) {
+                            sendChunk();
+                        } else {
+                            $('#start-upload-btn').prop('disabled', false).html('<i class="bi bi-check-lg me-1"></i>完成');
+                            showToast('模型上传完成：' + file.name, 'success');
+                            loadFiles();
+                            setTimeout(function() {
+                                var m = bootstrap.Modal.getInstance(document.getElementById('uploadModal'));
+                                if (m) m.hide();
+                            }, 800);
+                        }
+                    })
+                    .catch(function(e) { fail(e.message || String(e)); });
+            }
+            sendChunk();
+        });
+
+        // ---------- 服务表单 ----------
+        function setType(type) {
+            currentType = type;
+            $('#service-type').val(type);
+            $('#type-switch button').each(function() {
+                var on = $(this).data('type') === type;
+                $(this).toggleClass('btn-primary', on).toggleClass('btn-outline-secondary', !on);
+            });
+            $('#local-fields').toggle(type === 'local');
+            $('#remote-fields').toggle(type === 'remote');
+        }
+
+        $('#type-switch button').on('click', function() {
+            if ($('#service-id').val()) return;
+            setType($(this).data('type'));
+        });
+
+        function resetForm() {
+            $('#service-id').val('');
+            $('#serviceModalLabel').text('添加推理服务');
+            $('#type-switch button').prop('disabled', false);
+            setType('local');
+            $('#svc-name').val('');
+            $('#svc-model-name').val('');
+            $('#svc-vision-name').val('');
+            $('#svc-platform').val('rk3576');
+            $('#svc-rknn-cores').val('2');
+            $('#svc-model-id').val('');
+            $('#p-max-context').val(4096);
+            $('#p-max-tokens').val(512);
+            $('#p-temperature').val(0.8);
+            $('#p-top-p').val(0.9);
+            $('#p-top-k').val(1);
+            $('#p-repeat-penalty').val(1.1);
+            $('#svc-base-url').val('');
+            $('#svc-api-key').val('sk-ytllm');
+            $('#svc-remote-model-id').val('');
+            $('#svc-description').val('');
+            refreshModelSelects();
+        }
+
+        $('#add-service-btn').on('click', function() {
+            resetForm();
+            if (!allFiles.length) {
+                showToast('模型仓库还是空的，建议先上传一个 .rkllm 模型', 'info');
+            }
+            new bootstrap.Modal(document.getElementById('serviceModal')).show();
+        });
+
+        $(document).on('click', '.edit-btn', function() {
+            var sid = $(this).data('sid');
+            var s = null;
+            for (var i = 0; i < allServices.length; i++) {
+                if (allServices[i].id === sid) { s = allServices[i]; break; }
+            }
+            if (!s) return;
+
+            resetForm();
+            $('#serviceModalLabel').text('编辑推理服务');
+            $('#service-id').val(sid);
+            $('#type-switch button').prop('disabled', true);
+            setType(s.service_type || 'remote');
+            $('#svc-name').val(s.name);
+            $('#svc-description').val(s.description || '');
+
+            if (s.service_type === 'local') {
+                var lname = (s.model_path || '').split(/[\\/]/).pop();
+                var vname = (s.vision_model_path || '').split(/[\\/]/).pop();
+                $('#svc-model-name').val(lname);
+                $('#svc-vision-name').val(vname);
+                $('#svc-platform').val(s.platform || 'rk3576');
+                $('#svc-rknn-cores').val(String(s.rknn_cores || 2));
+                $('#svc-model-id').val(s.model_id);
+                var p = s.params || {};
+                $('#p-max-context').val(p.max_context != null ? p.max_context : 4096);
+                $('#p-max-tokens').val(p.max_tokens != null ? p.max_tokens : 512);
+                $('#p-temperature').val(p.temperature != null ? p.temperature : 0.8);
+                $('#p-top-p').val(p.top_p != null ? p.top_p : 0.9);
+                $('#p-top-k').val(p.top_k != null ? p.top_k : 1);
+                $('#p-repeat-penalty').val(p.repeat_penalty != null ? p.repeat_penalty : 1.1);
+            } else {
+                $('#svc-base-url').val(s.base_url);
+                $('#svc-remote-model-id').val(s.model_id);
+            }
+            new bootstrap.Modal(document.getElementById('serviceModal')).show();
+        });
+
+        $('#saveServiceBtn').on('click', function() {
+            var sid = $('#service-id').val();
+            var isLocal = currentType === 'local';
+            var data = {
+                service_type: currentType,
+                name: $('#svc-name').val().trim(),
+                description: $('#svc-description').val().trim()
+            };
+
+            if (isLocal) {
+                data.model_name = $('#svc-model-name').val();
+                data.vision_model_name = $('#svc-vision-name').val();
+                data.platform = $('#svc-platform').val();
+                data.rknn_cores = parseInt($('#svc-rknn-cores').val(), 10);
+                data.model_id = $('#svc-model-id').val().trim();
+                data.params = {
+                    max_context: parseInt($('#p-max-context').val(), 10) || 4096,
+                    max_tokens: parseInt($('#p-max-tokens').val(), 10) || 512,
+                    temperature: parseFloat($('#p-temperature').val()) || 0.8,
+                    top_p: parseFloat($('#p-top-p').val()) || 0.9,
+                    top_k: parseInt($('#p-top-k').val(), 10) || 1,
+                    repeat_penalty: parseFloat($('#p-repeat-penalty').val()) || 1.1
+                };
+                if (!data.model_name) { showToast('请选择语言模型', 'error'); return; }
+                if (!data.model_id) { data.model_id = data.model_name.replace(/\.rkllm$/i, ''); }
+            } else {
+                data.base_url = $('#svc-base-url').val().trim();
+                data.api_key = $('#svc-api-key').val().trim() || 'sk-ytllm';
+                data.model_id = $('#svc-remote-model-id').val().trim();
+                if (!data.base_url || !data.model_id) { showToast('API 地址和模型 ID 不能为空', 'error'); return; }
+            }
+
+            if (!data.name) { showToast('服务名称不能为空', 'error'); return; }
+
+            var url = sid ? SRV + sid + '/update/' : SRV + 'create/';
+            var $btn = $(this);
+            $btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>保存中…');
+
+            $.ajax({
+                url: url,
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(data),
+                success: function(res) {
+                    if (res.status === 'success') {
+                        showToast(sid ? '服务更新成功' : '服务创建成功', 'success');
+                        bootstrap.Modal.getInstance(document.getElementById('serviceModal')).hide();
+                        loadServices();
+                    } else {
+                        showToast(res.message || '操作失败', 'error');
+                    }
+                },
+                error: function() { showToast('网络错误', 'error'); },
+                complete: function() { $btn.prop('disabled', false).html('<i class="bi bi-check-lg me-1"></i>保存'); }
+            });
+        });
+
+        $(document).on('click', '.delete-btn', function() {
+            var sid = $(this).data('sid');
+            var sname = $(this).data('sname');
+            $('#del-svc-name').text(sname);
+            $('#confirm-delete-btn').data('sid', sid);
+            new bootstrap.Modal(document.getElementById('deleteServiceModal')).show();
+        });
+        $('#confirm-delete-btn').on('click', function() {
+            var sid = $(this).data('sid');
+            var $btn = $(this);
+            $btn.prop('disabled', true).text('删除中…');
+            $.post(SRV + sid + '/delete/', function(res) {
+                bootstrap.Modal.getInstance(document.getElementById('deleteServiceModal')).hide();
+                if (res.status === 'success') { showToast('服务已删除', 'success'); loadServices(); }
+                else showToast(res.message || '删除失败', 'error');
+            }).fail(function() { showToast('删除失败', 'error'); })
+              .always(function() { $btn.prop('disabled', false).text('删除'); });
+        });
+
+        // ---------- 复制对外接口 ----------
+        $(document).on('click', '.copy-api-btn', function() {
+            var sid = $(this).data('sid');
+            var svc = null;
+            for (var i = 0; i < allServices.length; i++) { if (allServices[i].id === sid) { svc = allServices[i]; break; } }
+            if (!svc) return;
+            var origin = location.origin;
+            var url = origin + '/v1/chat/completions';
+            var svcName = svc.name || svc.id;
+            $('#api-url').val(url);
+            $('#api-model').val(svcName);
+            $.getJSON('/api/config/', function(cfg) {
+                var key = (cfg && cfg.config && cfg.config.gateway_api_key) ? cfg.config.gateway_api_key : '';
+                var authLine = key ? '  -H "Authorization: Bearer ' + key + '" \\\n' : '';
+                /* 标准写法：仅靠 model 字段定位服务，任何 OpenAI 兼容客户端零配置可用 */
+                var curl = 'curl ' + url + ' \\\n' +
+                    '  -H "Content-Type: application/json" \\\n' +
+                    authLine +
+                    '  -d \'{\n' +
+                    '    "model": "' + svcName + '",\n' +
+                    '    "messages": [{"role":"user","content":"你好"}],\n' +
+                    '    "stream": true\n' +
+                    '  }\'';
+                $('#api-curl').text(curl);
+                var pyKey = key ? key : 'sk-noauth';
+                var py = 'from openai import OpenAI\n\n' +
+                    'client = OpenAI(\n' +
+                    '    base_url="' + origin + '/v1",\n' +
+                    '    api_key="' + pyKey + '"\n' +
+                    ')\n\n' +
+                    'stream = client.chat.completions.create(\n' +
+                    '    model="' + svcName + '",\n' +
+                    '    messages=[{"role": "user", "content": "你好"}],\n' +
+                    '    stream=True\n' +
+                    ')\n' +
+                    'for chunk in stream:\n' +
+                    '    if chunk.choices and chunk.choices[0].delta.content:\n' +
+                    '        print(chunk.choices[0].delta.content, end="", flush=True)';
+                $('#api-python').text(py);
+            });
+            new bootstrap.Modal(document.getElementById('apiModal')).show();
+        });
+
+        $(document).on('click', '.copy-btn', function() {
+            var id = $(this).data('copy');
+            var el = document.getElementById(id);
+            if (!el) return;
+            var val = el.tagName === 'INPUT' ? el.value : el.textContent;
+            if (!val) return;
+            var $btn = $(this);
+            var done = function() {
+                var old = $btn.html();
+                $btn.html('<i class="bi bi-check2"></i> 已复制');
+                setTimeout(function() { $btn.html(old); }, 1500);
+                showToast('已复制到剪贴板', 'success');
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(val).then(done, function() { fallbackCopy(val); done(); });
+            } else { fallbackCopy(val); done(); }
+        });
+        function fallbackCopy(text) {
+            var ta = document.createElement('textarea');
+            ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); } catch (e) {}
+            document.body.removeChild(ta);
+        }
+
+        // ---------- 运行环境 ----------
+        function loadRuntime() {
+            $.get('/api/engine/runtime/', function(res) {
+                if (res.status !== 'success') return;
+                var r = res.runtime || {};
+                var ok = r.libraries_ready;
+                $('#runtime-summary').html(
+                    '<span class="status-cell"><span class="dot" style="background:' + (ok ? '#22c55e' : '#f59e0b') + '"></span>'
+                    + '<span class="text-muted small">' + (ok ? (r.soc || 'RKLLM 就绪') : '未检测到 RKLLM 运行时') + '</span></span>'
+                );
+                if (!ok) {
+                    $('#runtime-summary').append(
+                        '<button class="btn btn-sm btn-outline-secondary" id="runtime-detail-btn" title="查看详情"><i class="bi bi-info-circle"></i></button>'
+                    );
+                }
+            });
+        }
+
+        $(document).on('click', '#runtime-detail-btn', function() {
+            $.get('/api/engine/runtime/', function(res) {
+                var r = res.runtime || {};
+                var lines = [
+                    '操作系统: ' + (r.os || '—') + ' / ' + (r.arch || '—'),
+                    'Python: ' + (r.python || '—'),
+                    'SoC: ' + (r.soc || '未检测到（非 Rockchip 设备）'),
+                    'NPU 驱动: ' + (r.npu_driver || '未检测到'),
+                    'RKLLM 运行时: ' + (r.rkllm_lib || '未找到 /usr/local/lib/librkllmrt.so'),
+                    'RKLLM 版本: ' + (r.rkllm_version || '—'),
+                    'RKNN 版本: ' + (r.rknn_version || '—'),
+                    '引擎脚本: ' + (r.engine_script_ready ? '就绪' : '缺失')
+                ];
+                showToast(lines.join('\n'), r.libraries_ready ? 'success' : 'error');
+            });
+        });
+
+        loadRuntime();
+        loadServices();
+        loadFiles();
+        setInterval(loadServices, 8000);
+    })();
+    </script>
+{% end %}
